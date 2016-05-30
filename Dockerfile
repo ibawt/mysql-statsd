@@ -1,4 +1,4 @@
-FROM busybox
+FROM debian:jessie
 
 COPY bin/mysql-statsd /
 COPY script/run.sh /

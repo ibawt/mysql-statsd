@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -30,8 +31,32 @@ func reportMetric(key string, value string) error {
 	}
 	defer conn.Close()
 
-	_, err = conn.Write([]byte(fmt.Sprintf("%s:%d|g", key, i)))
+	_, err = conn.Write([]byte(fmt.Sprintf("mysql.%s:%d|g", strings.ToLower(key), i)))
 
+	return nil
+}
+
+func poll(db *sql.DB) error {
+	rows, err := db.Query("show global status")
+	if err != nil {
+		return err
+	} else {
+		defer rows.Close()
+
+		var key string
+		var value string
+
+		for rows.Next() {
+			err = rows.Scan(&key, &value)
+			if err != nil {
+				return err
+			}
+			err = reportMetric(key, value)
+			if err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -46,41 +71,22 @@ func main() {
 		http.ListenAndServe(":3000", nil)
 	}()
 
-	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@%s/%s", *username, *password, *mysql_host, *mysql_database))
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s", *username, *password, *mysql_host, *mysql_port, *mysql_database)
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		fmt.Printf("Error in opening mysql connection: %v\n", err)
 		os.Exit(1)
 	}
 
 	if err = db.Ping(); err != nil {
-		fmt.Printf("Error in database conncetion: %s!\n", err)
+		fmt.Printf("Error in database connection: %s!\n", err)
 		os.Exit(1)
 	}
 
 	defer db.Close()
 
 	for {
-		rows, err := db.Query("show status")
-		if err != nil {
-			fmt.Printf("Error in query: %v\n", err)
-		} else {
-			var key string
-			var value string
-
-			for rows.Next() {
-				err = rows.Scan(&key, &value)
-				if err != nil {
-					fmt.Printf("error in scan: %v\n", err)
-					continue
-				}
-				err = reportMetric(key, value)
-				if err != nil {
-					fmt.Printf("error in reporting: %v\n", err)
-				}
-			}
-
-			rows.Close()
-		}
+		poll(db)
 		time.Sleep(30)
 	}
 }
